@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+specs/** linguist-documentation=true
+docs/** linguist-documentation=true
+*.md linguist-documentation=true
