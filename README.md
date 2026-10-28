@@ -1,671 +1,131 @@
 <div align="center">
 
-# 💸 payout-engine
+# 💸 Payout Engine & Treasury Gateway
 
-> High-reliability automated disbursement and batch settlement gateway engine built for marketplace platforms.
-
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Architecture](https://img.shields.io/badge/Architecture-Two--Phase%20Commit%20%7C%20Queued-2ea44f)](#)
-[![Runtime](https://img.shields.io/badge/Runtime-Go-blue)](#)
+[![Payout Engine CI & Compliance Suite](https://github.com/DeborahPanzer/payout-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/DeborahPanzer/payout-engine/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Architecture: Two-Phase Commit | Queued](https://img.shields.io/badge/Architecture-Two--Phase_Commit_%7C_Queued-2ea44f)](#)
+[![Compliance: OFAC | NACHA | ISO-20022](https://img.shields.io/badge/Compliance-OFAC_%7C_NACHA_%7C_ISO--20022-blueviolet)](#)
+[![Formal Verification: TLA+](https://img.shields.io/badge/Formal_Verification-TLA%2B-informational)](#)
+[![Language: Go 100%](https://img.shields.io/badge/Language-Go_100%25-00ADD8)](#)
 [![Sponsor](https://img.shields.io/badge/Sponsor-DeborahPanzer-ea4aaa?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/DeborahPanzer)
 
 </div>
 
 ---
 
-## Payout Architecture
-
-The payout module handles the transfer of available funds from the platform balance to sellers, vendors, creators, or connected accounts.
-
-Unlike customer payments, payouts are outbound transactions. They require separate balance tracking, eligibility checks, provider integration, reconciliation, and failure handling.
-
-> This payout implementation is intended for demonstration purposes. Real fund transfers require a properly configured payout provider and verified recipient accounts.
-
-### Payout Features
-
-* Recipient account management
-* Available and pending balance tracking
-* Manual and automatic payouts
-* Minimum payout threshold
-* Payout fee calculation
-* Multiple payout methods
-* Payout approval workflow
-* Idempotent payout requests
-* Provider webhook processing
-* Failed payout retry support
-* Payout cancellation when supported
-* Transaction history
-* Audit logging
-* Reconciliation support
-
-## Payout Technical Architecture
-
-```mermaid
-flowchart TD
-    Admin[Admin or Scheduled Job] --> API[Payout API]
-    API --> Validation[Payout Validation]
-    Validation --> PayoutService[Payout Service]
-
-    PayoutService --> BalanceService[Balance Service]
-    PayoutService --> RecipientService[Recipient Service]
-    PayoutService --> ComplianceService[Compliance Service]
-    PayoutService --> PayoutAdapter[Payout Provider Adapter]
-
-    BalanceService --> Database[(Database)]
-    RecipientService --> Database
-    ComplianceService --> Database
-    PayoutService --> Database
-
-    PayoutAdapter --> Provider[Payout Provider]
-    Provider --> Bank[Recipient Bank or Wallet]
-    Provider --> Webhook[Payout Webhook Handler]
-    Webhook --> PayoutService
-```
-
-## Payout Architecture Layers
-
-### Payout API Layer
-
-The payout API receives requests from administrators, sellers, internal services, or scheduled payout jobs.
-
-Its responsibilities include:
-
-* Authenticating the requester
-* Validating payout requests
-* Verifying recipient ownership
-* Checking payout permissions
-* Preventing duplicate requests
-* Calling the payout service
-* Returning standardized payout responses
-* Protecting sensitive payout endpoints
-
-Example endpoint:
-
-```http
-POST /api/payouts
-```
-
-Example single payout request:
-
-```json
-{
-  "recipientId": "recipient_123456",
-  "amount": 500000,
-  "currency": "USD",
-  "method": "bank_transfer",
-  "description": "Seller payout for July 2026"
-}
-```
-
-Example batch settlement & disbursement payload:
-
-```json
-{
-  "batchId": "batch_20261017_0091",
-  "currency": "USD",
-  "recipient": {
-    "merchantId": "acct_1M2N3P4Q5R6S7T",
-    "destinationType": "custom_connected_account",
-    "routingNumber": "110000000"
-  },
-  "settlement": {
-    "grossAmount": 450000,
-    "platformFee": 45000,
-    "netDisbursement": 405000
-  },
-  "idempotencyKey": "disb_idem_8f7b2c1e4a"
-}
-```
-
-The requested amount must never be trusted without checking the recipient's available balance on the server.
-
-### Payout Service
-
-The payout service coordinates the complete payout workflow.
-
-Typical workflow:
-
-1. Authenticate the payout requester.
-2. Validate the recipient account.
-3. Verify payout eligibility.
-4. Load the recipient's available balance.
-5. Validate the requested amount.
-6. Calculate payout fees.
-7. Reserve the payout amount.
-8. Create a pending payout record.
-9. Submit the payout to the provider.
-10. Store the provider transaction identifier.
-11. Return the payout result.
-12. Wait for webhook confirmation when processing is asynchronous.
-
-Provider-specific logic should remain inside the payout gateway adapter.
-
-### Balance Service
-
-The balance service manages funds belonging to each payout recipient.
-
-Recommended balance categories:
-
-```text
-PENDING
-AVAILABLE
-RESERVED
-PAID_OUT
-REFUNDED
-DISPUTED
-```
-
-Example recipient balance:
-
-```json
-{
-  "recipientId": "recipient_123456",
-  "currency": "USD",
-  "pending": 300000,
-  "available": 1500000,
-  "reserved": 500000,
-  "paidOut": 4200000
-}
-```
-
-A payout should only use the available balance.
-
-When a payout request is created, the payout amount should move from `AVAILABLE` to `RESERVED`.
-
-When the payout succeeds, the reserved amount should move to `PAID_OUT`.
-
-When the payout fails permanently, the reserved amount should return to `AVAILABLE`.
-
-### Recipient Service
-
-The recipient service manages payout destination information.
-
-A recipient may represent:
-
-* Seller
-* Vendor
-* Creator
-* Marketplace account
-* Contractor
-* Connected business account
-
-Example recipient:
-
-```json
-{
-  "id": "recipient_123456",
-  "name": "Demo Seller",
-  "type": "seller",
-  "status": "VERIFIED",
-  "defaultPayoutMethodId": "method_123456",
-  "currency": "USD"
-}
-```
-
-Sensitive banking information should not be stored directly unless required.
-
-When possible, store only provider-generated tokens or external account identifiers.
-
-### Compliance Service
-
-The compliance service determines whether a recipient is eligible to receive payouts.
-
-Possible checks include:
-
-* Identity verification status
-* Business verification status
-* Bank account verification
-* Supported country
-* Supported currency
-* Payout account restrictions
-* Sanctions screening
-* Risk review status
-* Daily and monthly payout limits
-
-Example recipient verification statuses:
-
-```text
-UNVERIFIED
-PENDING_VERIFICATION
-VERIFIED
-RESTRICTED
-REJECTED
-SUSPENDED
-```
-
-A recipient must not receive a payout while their account is restricted, rejected, or suspended.
-
-### Payout Fee Calculation
-
-Payout fees must be calculated on the server.
-
-```text
-Requested payout amount
-- Payout fee
-= Recipient receives
-```
-
-Example:
-
-```json
-{
-  "currency": "USD",
-  "requestedAmount": 500000,
-  "payoutFee": 10000,
-  "recipientReceives": 490000
-}
-```
-
-The platform must clearly define whether the payout fee is:
-
-* Deducted from the requested amount
-* Charged separately to the platform
-* Included in the recipient's balance calculation
-
-Money values should use integers in the smallest supported currency unit.
-
-## Payout Statuses
-
-Recommended payout statuses:
-
-```text
-DRAFT
-PENDING_APPROVAL
-QUEUED
-PROCESSING
-SUCCEEDED
-FAILED
-CANCELLED
-REVERSED
-```
-
-Suggested status meanings:
-
-| Status             | Description                              |
-| ------------------ | ---------------------------------------- |
-| `DRAFT`            | Payout record created but not submitted  |
-| `PENDING_APPROVAL` | Waiting for administrative approval      |
-| `QUEUED`           | Approved and waiting to be processed     |
-| `PROCESSING`       | Submitted to the payout provider         |
-| `SUCCEEDED`        | Funds successfully sent                  |
-| `FAILED`           | Payout could not be completed            |
-| `CANCELLED`        | Payout cancelled before completion       |
-| `REVERSED`         | Previously completed payout was returned |
-
-The provider status and internal payout status should be stored separately.
-
-Example provider statuses:
-
-```text
-PENDING
-IN_TRANSIT
-PAID
-FAILED
-CANCELLED
-RETURNED
-```
-
-## Payout Gateway Adapter
-
-Payout provider integrations should be isolated behind a common Go interface.
-
-```go
-type PayoutGateway interface {
-	CreateRecipient(input CreateRecipientInput) (RecipientResult, error)
-	CreatePayout(input CreatePayoutInput) (PayoutResult, error)
-	GetPayoutStatus(payoutId string) (PayoutStatus, error)
-	CancelPayout(payoutId string) (CancelPayoutResult, error)
-}
-```
-
-Possible implementations:
-
-```text
-MockPayoutGateway
-StripeConnectPayoutGateway
-PayPalPayoutGateway
-BankTransferPayoutGateway
-```
-
-The payout service should not directly depend on a specific provider.
-
-## Payout Sequence
-
-```mermaid
-sequenceDiagram
-    participant Admin
-    participant API
-    participant PayoutService
-    participant BalanceService
-    participant PayoutGateway
-    participant Provider
-    participant Webhook
-
-    Admin->>API: POST /api/payouts
-    API->>PayoutService: Create payout
-    PayoutService->>BalanceService: Check available balance
-    BalanceService-->>PayoutService: Return available balance
-    PayoutService->>BalanceService: Reserve payout amount
-    PayoutService->>PayoutService: Create pending payout
-    PayoutService->>PayoutGateway: Submit payout
-    PayoutGateway->>Provider: Create provider payout
-    Provider-->>PayoutGateway: Return payout identifier
-    PayoutGateway-->>PayoutService: Return processing result
-    PayoutService-->>API: Return payout response
-    API-->>Admin: Payout queued or processing
-
-    Provider->>Webhook: Send payout event
-    Webhook->>PayoutService: Update payout status
-    PayoutService->>BalanceService: Finalize or release funds
-```
-
-## Automatic Payouts
-
-Automatic payouts may be processed by a scheduled job.
-
-Example payout schedules:
-
-```text
-DAILY
-WEEKLY
-MONTHLY
-MANUAL
-```
-
-Recommended scheduled payout workflow:
-
-1. Find verified recipients with automatic payouts enabled.
-2. Calculate each recipient's available balance.
-3. Check the minimum payout threshold.
-4. Apply account limits and compliance rules.
-5. Create an idempotent payout request.
-6. Reserve the payout amount.
-7. Submit the payout to the provider.
-8. Record the processing result.
-9. Continue processing other recipients when one payout fails.
-
-Example scheduler:
-
-```text
-Every day at 02:00 UTC
-```
-
-Automatic payout jobs should use distributed locking to prevent multiple workers from creating duplicate payouts.
-
-## Payout Approval Workflow
-
-High-value or high-risk payouts may require manual approval.
-
-Example approval statuses:
-
-```text
-NOT_REQUIRED
-PENDING
-APPROVED
-REJECTED
-```
-
-Possible approval rules:
-
-* Payout amount exceeds a configured limit.
-* Recipient was recently created.
-* Recipient changed their bank account.
-* Recipient has an elevated risk score.
-* Payout is requested outside the normal schedule.
-* Account has unresolved disputes or negative balance.
-
-The user approving a payout should not be the same user who modified the payout destination when separation of duties is required.
-
-## Suggested Payout Project Structure
-
-```text
-payout-engine/
-├── go.mod
-├── engine.go
-├── engine_test.go
-├── internal/
-│   ├── app/
-│   │   ├── payouts/
-│   │   ├── payout-history/
-│   │   ├── payout-settings/
-│   │   └── api/
-│   │       ├── payouts/
-│   │       ├── recipients/
-│   │       ├── balances/
-│   │       └── webhooks/
-│   │           └── payouts/
-│   ├── services/
-│   │   ├── payout.service.go
-│   │   ├── balance.service.go
-│   │   ├── recipient.service.go
-│   │   ├── compliance.service.go
-│   │   └── reconciliation.service.go
-│   ├── gateways/
-│   │   ├── payout-gateway.interface.go
-│   │   ├── mock-payout.gateway.go
-│   │   └── stripe-connect-payout.gateway.go
-│   ├── repositories/
-│   │   ├── payout.repository.go
-│   │   ├── balance.repository.go
-│   │   └── recipient.repository.go
-│   └── jobs/
-│       ├── automatic-payout.job.go
-│       └── payout-reconciliation.job.go
-```
-
-## Example Payout Response
-
-Successful payout creation:
-
-```json
-{
-  "success": true,
-  "payoutId": "payout_123456",
-  "recipientId": "recipient_123456",
-  "status": "PROCESSING",
-  "amount": 500000,
-  "fee": 10000,
-  "recipientReceives": 490000,
-  "currency": "USD",
-  "provider": "mock"
-}
-```
-
-Failed payout request:
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "INSUFFICIENT_BALANCE",
-    "message": "The recipient does not have enough available balance."
-  }
-}
-```
-
-Other recommended error codes:
-
-```text
-INVALID_RECIPIENT
-RECIPIENT_NOT_VERIFIED
-PAYOUT_METHOD_NOT_FOUND
-UNSUPPORTED_CURRENCY
-AMOUNT_BELOW_MINIMUM
-AMOUNT_ABOVE_LIMIT
-INSUFFICIENT_BALANCE
-PAYOUT_ALREADY_EXISTS
-PROVIDER_UNAVAILABLE
-PAYOUT_FAILED
-```
-
-## Payout Idempotency
-
-Payout requests must support idempotency to prevent duplicate fund transfers.
-
-Example header:
-
-```http
-Idempotency-Key: payout-recipient-123456-2026-07
-```
-
-The same idempotency key must return the original payout result instead of creating another payout.
-
-The idempotency record should include:
-
-* Idempotency key
-* Request hash
-* Payout identifier
-* Processing status
-* Response payload
-* Creation time
-* Expiration time
-
-## Payout Webhook Handling
-
-Payout provider webhooks should be treated as the trusted source for asynchronous payout updates.
-
-Example endpoint:
-
-```http
-POST /api/webhooks/payout
-```
-
-Recommended webhook workflow:
-
-1. Receive the payout event.
-2. Verify the provider signature.
-3. Validate the event type.
-4. Check whether the event was already processed.
-5. Find the related internal payout.
-6. Update the provider payout status.
-7. Update the internal payout status.
-8. Finalize or release the reserved balance.
-9. Record the event for auditing.
-10. Return a successful HTTP response.
-
-Example events:
-
-```text
-payout.created
-payout.processing
-payout.paid
-payout.failed
-payout.cancelled
-payout.returned
-```
-
-Webhook processing should be idempotent because providers may send the same event multiple times.
-
-## Payout Reconciliation
-
-Reconciliation compares internal payout records with provider records and bank settlement information.
-
-Recommended reconciliation checks:
-
-* Missing provider payouts
-* Unknown provider transactions
-* Amount mismatches
-* Currency mismatches
-* Incorrect payout fees
-* Stale processing payouts
-* Returned payouts
-* Duplicate transactions
-* Balance inconsistencies
-
-A scheduled reconciliation job should report mismatches without automatically modifying financial records unless the correction process is explicitly designed and audited.
-
-## Quick Start (Go Environment)
-
-Download module dependencies and run the test suite for `payout-engine`:
-
-```bash
-go mod tidy
-go test -v ./...
-```
-
-## Payout Environment Variables
-
-Add payout configuration to the environment file:
-
-```env
-PAYOUT_PROVIDER=mock
-PAYOUT_SECRET_KEY=
-PAYOUT_WEBHOOK_SECRET=
-PAYOUT_MINIMUM_AMOUNT=100000
-PAYOUT_DEFAULT_CURRENCY=USD
-PAYOUT_SCHEDULE=manual
-PAYOUT_AUTO_APPROVAL_LIMIT=5000000
-```
-
-Provider credentials must remain on the server and must never be exposed to the frontend.
-
-## Payout Security Considerations
-
-* Require authentication for every payout endpoint.
-* Apply role-based access control.
-* Verify recipient ownership.
-* Require re-authentication for payout method changes.
-* Recheck the available balance inside a database transaction.
-* Use row-level locking when reserving funds.
-* Use idempotency keys for all payout requests.
-* Verify every provider webhook signature.
-* Encrypt sensitive recipient information.
-* Never log complete bank account details.
-* Record all payout actions in an audit log.
-* Require approval for high-value payouts.
-* Rate-limit payout creation endpoints.
-* Detect unusual payout behavior.
-* Prevent payouts to restricted recipients.
-* Notify recipients when payout details change.
-* Separate production and test provider credentials.
-
-## Payout Testing
-
-Important payout scenarios to test:
-
-* Successful manual payout
-* Successful automatic payout
-* Insufficient available balance
-* Recipient not verified
-* Missing payout method
-* Amount below the minimum threshold
-* Amount above the payout limit
-* Duplicate payout submission
-* Concurrent payout requests
-* Provider timeout
-* Provider rejection
-* Invalid webhook signature
-* Duplicate webhook event
-* Successful payout confirmation
-* Failed payout balance release
-* Returned payout
-* Payout cancellation
-* Manual approval and rejection
-* Reconciliation mismatch
-
-## Payout Future Improvements
-
-* Add multiple payout currencies
-* Add configurable payout schedules
-* Add instant payout support
-* Add recipient self-service onboarding
-* Add payout method verification
-* Add two-factor approval for large payouts
-* Add negative balance recovery
-* Add reserve and rolling-hold rules
-* Add tax and financial reporting
-* Add downloadable payout statements
-* Add provider failover
-* Add payout analytics dashboard
-* Add automated reconciliation reports
-* Add risk scoring and fraud detection
+`payout-engine` is an enterprise-grade, zero-dependency automated disbursement and treasury settlement gateway built for **Go (Golang)** runtimes. It orchestrates **Two-Phase Commit (2PC) batch payouts**, **multi-party marketplace splits**, **rolling reserve holdbacks**, **OFAC sanctions screening**, and **multi-rail bank clearing (FedNow ISO-20022, NACHA ACH, SEPA)**.
 
 ---
 
-## 💖 Sponsorship & Maintenance
+## 🏛️ Architectural Disbursement Pipeline
 
-Building and testing automated banking payout tooling requires continuous integration testing against multiple mock banking gateways.
+```text
+                  [Settlement Trigger / Split Request]
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 1. COMPLIANCE, TAX & ATO VELOCITY SHIELD                         │
+│    • OFAC SDN Sanctions Screening Gate (pkg/ofac)                │
+│    • 24h Beneficiary Bank-Swap Cooling Guard (pkg/velocity)      │
+│    • IRS Form 1099-K & 24% Backup Withholding (pkg/tax)          │
+└──────────────────────────────────┬───────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 2. SPLIT ACCOUNTING, NETTING & 2PC COORDINATION                  │
+│    • Multi-Party Marketplace Split Engine (pkg/split)            │
+│    • Rolling Reserve Holdback & Maturity Lock (pkg/reserve)      │
+│    • Multilateral Intraday Obligation Netting (pkg/netting)      │
+│    • Unanimous Two-Phase Commit Coordinator (pkg/twophase)       │
+└──────────────────────────────────┬───────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 3. TREASURY LIQUIDITY & MULTI-RAIL BANK CLEARING                 │
+│    • Nostro Pool Liquidity & Buffer Router (pkg/liquidity)       │
+│    • FedNow / RTP ISO-20022 pacs.008 XML Builder (pkg/rtp)       │
+│    • US NACHA ACH 94-Byte CCD & ABA Mod-10 Engine (pkg/ach)      │
+│    • SEPA ISO-13616 IBAN Modulo-97 Validator (pkg/sepa)          │
+│    • SHA-256 Merkle Batch Sealer & DLQ Retry Queue (pkg/merkle)  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-If this codebase assists your fintech infrastructure:
+---
 
-👉 **[Support ongoing open-source development via GitHub Sponsors](https://github.com/sponsors/DeborahPanzer)**
+## 📂 Repository Structure & Core Packages
+
+```text
+payout-engine/
+├── .github/workflows/ci.yml                   # Automated Go vet & concurrency race detector CI
+├── docs/
+│   ├── adr/
+│   │   ├── 0001-two-phase-commit-and-rolling-reserves.md # ADR-0001: 2PC & rolling reserves
+│   │   └── 0002-multi-rail-clearing-fednow-ach-sepa.md   # ADR-0002: Multi-rail clearing
+│   └── PAYOUT-COMPLIANCE-AND-BSA-AML-MATRIX.md # OFAC, NACHA, ISO-20022 & IRS control matrix
+├── pkg/
+│   ├── ach/                                   # NACHA 94-byte CCD generator & ABA Mod-10 check
+│   ├── circuit/                               # Bank rail circuit breaker (FedNow -> ACH failover)
+│   ├── liquidity/                             # Nostro treasury pool selector & buffer guard
+│   ├── merkle/                                # SHA-256 Merkle root batch manifest sealer
+│   ├── netting/                               # Multilateral batch obligation netting engine
+│   ├── ofac/                                  # OFAC SDN sanctions entity screening gate
+│   ├── queue/                                 # Exponential backoff retry scheduler & DLQ isolation
+│   ├── reserve/                               # Merchant rolling reserve & maturity calculator
+│   ├── returncodes/                           # NACHA ACH return classifier (R01-R29 dispositions)
+│   ├── rtp/                                   # FedNow / RTP ISO-20022 (pacs.008.001.08) builder
+│   ├── sepa/                                  # ISO-13616 arbitrary-precision IBAN Mod-97 check
+│   ├── split/                                 # Marketplace multi-party split & penny allocation
+│   ├── tax/                                   # US IRS Form 1099-K & 24% backup withholding
+│   ├── twophase/                              # Atomic Two-Phase Commit (2PC) batch coordinator
+│   ├── velocity/                              # Bank-swap cooling lock & daily velocity limiter
+│   └── webhook/                               # Constant-time HMAC-SHA256 webhook dispatcher
+├── specs/
+│   ├── RollingReserveInvariant.tla            # TLA+ formal proof of reserve conservation
+│   └── TwoPhasePayoutCommit.tla               # TLA+ formal proof of single-wire atomicity
+├── .env.example                               # Treasury & 2PC environment variable template
+├── .gitattributes                             # Linguist 100% Go classification & LF rules
+├── .gitignore                                 # Go binary & secret keystore exclusions
+├── ARCHITECTURE.md                            # Formal 2PC state machines & split conservation
+├── BENCHMARK.md                               # Go runtime throughput & P99 latency telemetry
+├── CHANGELOG.md                               # Enterprise semantic release history (v1.1.0)
+├── SECURITY.md                                # Treasury isolation & ATO disclosure policy
+├── engine.go                                  # Root batch disbursement coordinator entrypoint
+└── go.mod                                     # Go module definition (zero external dependencies)
+```
+
+---
+
+## ⚙️ Key Enterprise Capabilities
+
+* **Atomic Two-Phase Commit (2PC) & Rolling Reserves:** Guarantees unanimous readiness across ledger, compliance, and treasury nodes (`pkg/twophase`) while isolating configurable basis-point chargeback reserves (`pkg/reserve`).
+* **Multi-Rail Clearing (FedNow, NACHA ACH, SEPA):** Generates **ISO-20022 (`pacs.008.001.08`)** instant credit transfers (`pkg/rtp`), **94-byte NACHA CCD** batch records with Modulo-10 ABA routing verification (`pkg/ach`), and **ISO-13616 Modulo-97** validated IBAN instructions (`pkg/sepa`).
+* **Pre-Disbursement OFAC & IRS 1099-K Governance:** Screens beneficiaries against **OFAC SDN** sanctions blocklists (`pkg/ofac`), enforces 24-hour cooling locks after bank routing updates (`pkg/velocity`), and applies statutory **24% IRS backup withholding** on unverified TIN accounts (`pkg/tax`).
+* **Multilateral Netting & Nostro Liquidity Routing:** Compresses intraday payables and clawbacks into net settlement positions (`pkg/netting`) and selects cost-optimal **Nostro treasury pools** without breaching minimum liquidity buffers (`pkg/liquidity`).
+
+---
+
+## 🧪 Verification & Concurrency Race Suite
+
+```bash
+# 1. Run static analysis across all disbursement packages
+go vet ./...
+
+# 2. Execute unit test suite with Go concurrency race detector enabled
+go test -v -race ./...
+```
+
+---
+
+## 📜 Documentation & Governance
+
+* [**System Architecture & 2PC State Machines (`ARCHITECTURE.md`)**](ARCHITECTURE.md)
+* [**OFAC, NACHA & BSA/AML Compliance Matrix (`docs/PAYOUT-COMPLIANCE-AND-BSA-AML-MATRIX.md`)**](docs/PAYOUT-COMPLIANCE-AND-BSA-AML-MATRIX.md)
+* [**ADR-0001: 2PC Coordination & Rolling Reserves (`docs/adr/0001-two-phase-commit-and-rolling-reserves.md`)**](docs/adr/0001-two-phase-commit-and-rolling-reserves.md)
+* [**ADR-0002: Multi-Rail Clearing & OFAC Screening (`docs/adr/0002-multi-rail-clearing-fednow-ach-sepa.md`)**](docs/adr/0002-multi-rail-clearing-fednow-ach-sepa.md)
+* [**Throughput & Concurrency Benchmarks (`BENCHMARK.md`)**](BENCHMARK.md)
+* [**Treasury Security Policy (`SECURITY.md`)**](SECURITY.md)
+
+## License
+
+Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for full details.
