@@ -1,3 +1,4 @@
+// Package ach implements US NACHA 94-byte CCD formatting and ABA routing validation.
 package ach
 
 import (
