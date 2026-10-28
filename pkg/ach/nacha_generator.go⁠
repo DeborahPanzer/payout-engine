@@ -1,0 +1,57 @@
+package ach
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+func ValidateABARoutingNumber(aba string) bool {
+	if len(aba) != 9 {
+		return false
+	}
+	weights := [9]int{3, 7, 1, 3, 7, 1, 3, 7, 1}
+	sum := 0
+	for i := 0; i < 9; i++ {
+		ch := aba[i]
+		if ch < '0' || ch > '9' {
+			return false
+		}
+		sum += int(ch-'0') * weights[i]
+	}
+	return sum > 0 && sum%10 == 0
+}
+
+func FormatNachaEntryDetailCCD(routingNumber, accountNumber, receiverName, traceNumber string, amountCents int64) (string, error) {
+	if !ValidateABARoutingNumber(routingNumber) {
+		return "", errors.New("ach: invalid 9-digit ABA routing number checksum")
+	}
+	if amountCents <= 0 || amountCents > 9999999999 {
+		return "", errors.New("ach: amount out of 10-digit NACHA bounds")
+	}
+
+	dfiAcct := fmt.Sprintf("%-17s", accountNumber)
+	if len(dfiAcct) > 17 {
+		dfiAcct = dfiAcct[:17]
+	}
+	nameField := fmt.Sprintf("%-22s", strings.ToUpper(receiverName))
+	if len(nameField) > 22 {
+		nameField = nameField[:22]
+	}
+	traceField := fmt.Sprintf("%015s", traceNumber)
+	if len(traceField) > 15 {
+		traceField = traceField[:15]
+	}
+
+	record := fmt.Sprintf("622%s%s%010d               %s  0%s",
+		routingNumber,
+		dfiAcct,
+		amountCents,
+		nameField,
+		traceField,
+	)
+	if len(record) != 94 {
+		return "", fmt.Errorf("ach: expected 94-byte NACHA record, got %d", len(record))
+	}
+	return record, nil
+}
