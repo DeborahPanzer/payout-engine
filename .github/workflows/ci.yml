@@ -1,0 +1,26 @@
+name: Payout Engine CI & Compliance Suite
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-verify:
+    name: Go Race Detector & Disbursement Invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go runtime
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run static analysis (go vet)
+        run: go vet ./...
+
+      - name: Execute unit tests with concurrency race detector
+        run: go test -v -race ./...
